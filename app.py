@@ -5,6 +5,7 @@ import base64
 import io
 import pandas as pd
 import numpy as np
+from scipy.signal import butter, filtfilt
 
 app = dash.Dash(__name__)
 app.title = 'Calcium Imaging Analyzer'
@@ -22,6 +23,12 @@ def compute_dff(trace, baseline_method='percentile', percentile=5, frame_range=N
     else:
         F0 = np.mean(trace)
     return (trace - F0) / F0
+
+def low_pass_filter(trace, sampling_rate=10, cutoff_freq=1, order=4):
+    nyquist = 0.5 * sampling_rate
+    normal_cutoff = cutoff_freq / nyquist
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    return filtfilt(b, a, trace)
 
 app.layout = html.Div([
     html.H2("Calcium Imaging Analysis Web App"),
@@ -58,8 +65,26 @@ app.layout = html.Div([
         ], id='frame-range-input', style={'marginTop': '10px', 'display': 'none'})
     ], style={'width': '60%', 'display': 'inline-block'}),
 
+    html.Div([
+        html.Label('Apply low-pass filter:'),
+        dcc.Checklist(
+            id='apply-filter',
+            options=[{'label': ' Enable', 'value': 'on'}],
+            value=[]
+        ),
+        html.Div([
+            html.Label('Sampling rate (Hz):'),
+            dcc.Input(id='sampling-rate', type='number', value=5.3, step=0.1),
+            html.Label('Cutoff frequency (Hz):'),
+            dcc.Input(id='cutoff-freq', type='number', value=1.0, step=0.1),
+            html.Label('Filter order:'),
+            dcc.Input(id='filter-order', type='number', value=4, step=1)
+        ], id='filter-settings', style={'marginTop': '10px'})
+    ], style={'marginTop': '20px'}),
+
     dcc.Graph(id='raw-traces'),
     dcc.Graph(id='dff-traces'),
+    dcc.Graph(id='filtered-traces'),
 
     dcc.Store(id='stored-data')
 ])
@@ -96,29 +121,44 @@ def parse_contents(contents, filename):
 
 @app.callback(
     Output('dff-traces', 'figure'),
+    Output('filtered-traces', 'figure'),
     Input('stored-data', 'data'),
     Input('baseline-method', 'value'),
     Input('frame-start', 'value'),
-    Input('frame-end', 'value')
+    Input('frame-end', 'value'),
+    Input('apply-filter', 'value'),
+    Input('sampling-rate', 'value'),
+    Input('cutoff-freq', 'value'),
+    Input('filter-order', 'value')
 )
-def update_dff_plot(data, baseline_method, frame_start, frame_end):
+def update_dff_plot(data, baseline_method, frame_start, frame_end, apply_filter, sampling_rate, cutoff_freq, filter_order):
     if data is None:
-        return go.Figure()
+        return go.Figure(), go.Figure()
 
     df = pd.read_json(data, orient='split')
     dff_df = pd.DataFrame()
+    filtered_df = pd.DataFrame()
 
     frame_range = (frame_start, frame_end) if baseline_method == 'mean_range' else None
 
     for col in df.columns:
-        dff_df[col] = compute_dff(df[col].values, baseline_method, frame_range=frame_range)
+        dff_trace = compute_dff(df[col].values, baseline_method, frame_range=frame_range)
+        dff_df[col] = dff_trace
+        if 'on' in apply_filter:
+            filtered_df[col] = low_pass_filter(dff_trace, sampling_rate, cutoff_freq, filter_order)
 
-    fig = go.Figure()
+    dff_fig = go.Figure()
     for col in dff_df.columns:
-        fig.add_trace(go.Scatter(y=dff_df[col], mode='lines', name=col))
-    fig.update_layout(title='dF/F Traces', xaxis_title='Frame', yaxis_title='dF/F')
+        dff_fig.add_trace(go.Scatter(y=dff_df[col], mode='lines', name=col))
+    dff_fig.update_layout(title='dF/F Traces', xaxis_title='Frame', yaxis_title='dF/F')
 
-    return fig
+    filtered_fig = go.Figure()
+    if 'on' in apply_filter:
+        for col in filtered_df.columns:
+            filtered_fig.add_trace(go.Scatter(y=filtered_df[col], mode='lines', name=col))
+        filtered_fig.update_layout(title='Filtered dF/F Traces', xaxis_title='Frame', yaxis_title='Filtered dF/F')
+
+    return dff_fig, filtered_fig
 
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=10000)
