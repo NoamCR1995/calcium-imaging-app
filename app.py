@@ -1,5 +1,5 @@
 import dash
-from dash import dcc, html, Input, Output, State, ctx
+from dash import dcc, html, Input, Output, State
 import plotly.graph_objs as go
 import base64
 import io
@@ -131,11 +131,12 @@ def parse_contents(contents, filename):
     Input('cutoff-freq', 'value'),
     Input('filter-order', 'value')
 )
-def update_dff_plot(data, baseline_method, frame_start, frame_end, apply_filter, sampling_rate, cutoff_freq, filter_order):
+def update_dff_plot(data, baseline_method, frame_start, frame_end,
+                    apply_filter, sampling_rate, cutoff_freq, filter_order):
     if data is None:
         return go.Figure(), go.Figure()
 
-    df = pd.read_json(data, orient='split')
+    df = pd.read_json(io.StringIO(data), orient='split')
     dff_df = pd.DataFrame()
     filtered_df = pd.DataFrame()
 
@@ -161,4 +162,4 @@ def update_dff_plot(data, baseline_method, frame_start, frame_end, apply_filter,
     return dff_fig, filtered_fig
 
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=10000)
+    app.run(debug=True, host='0.0.0.0', port=10000)
